@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VistA Schema Inspector Workbench</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 font-sans p-6">
+    <div class="max-w-7xl mx-auto space-y-6">
+        
+        <div class="bg-gray-900 p-4 rounded-lg border border-gray-800 flex items-center justify-between">
+            <h1 class="text-xl font-bold text-emerald-400">Resilient SQL Staging Workbench</h1>
+            <div class="flex items-center space-x-2">
+                <input type="text" id="siFileNumInput" placeholder="Enter File # (e.g., 2)" class="bg-gray-950 border border-gray-700 px-3 py-1.5 rounded text-sm text-gray-200 focus:outline-none focus:border-emerald-500">
+                <button onclick="loadSchema()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded text-sm font-semibold transition">Go</button>
+            </div>
+        </div>
+
+        <div id="siWelcome" class="bg-gray-900/50 border border-gray-800 rounded-lg p-12 text-center text-gray-400">
+            <p class="text-lg">Enter a VistA file number above and click <strong>Go</strong> to inspect schema definitions and field layouts.</p>
+        </div>
+
+        <div id="siContent" class="hidden space-y-6">
+            
+            <div class="bg-gray-900 p-5 rounded-lg border border-gray-800 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <span id="siFileBadge" class="bg-emerald-950 text-emerald-400 text-xs px-2.5 py-1 rounded border border-emerald-800 font-mono">File #</span>
+                    <h2 id="siTitle" class="text-lg font-bold text-white mt-2">-</h2>
+                </div>
+                <div>
+                    <span class="text-xs text-gray-400 uppercase tracking-wider">Global Root</span>
+                    <p id="siGlobalRoot" class="text-sm font-mono text-blue-400 mt-1">-</p>
+                </div>
+                <div>
+                    <span class="text-xs text-gray-400 uppercase tracking-wider">Description</span>
+                    <p id="siDesc" class="text-xs text-gray-300 mt-1 line-clamp-3">-</p>
+                </div>
+            </div>
+
+            <div class="bg-gray-900 p-5 rounded-lg border border-gray-800 space-y-3">
+                <h3 class="text-sm font-bold text-gray-300 uppercase tracking-wider">Routine Touchpoints</h3>
+                <div id="siTouchpoints" class="space-y-2 max-h-40 overflow-y-auto">
+                    </div>
+            </div>
+
+            <div class="bg-gray-900 rounded-lg border border-gray-800 overflow-hidden">
+                <div class="p-4 border-b border-gray-800 flex justify-between items-center">
+                    <h3 class="text-sm font-bold text-gray-300 uppercase tracking-wider">Field Definitions</h3>
+                    <span id="siFieldCount" class="text-xs text-gray-400">0 fields</span>
+                </div>
+                <div class="overflow-x-auto max-h-[500px]">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-gray-800 text-gray-400 text-xs bg-gray-950 sticky top-0">
+                                <th class="p-2.5">Field #</th>
+                                <th class="p-2.5">Field Name</th>
+                                <th class="p-2.5">Node Key</th>
+                                <th class="p-2.5">Definition Value</th>
+                            </tr>
+                        </thead>
+                        <tbody id="siFieldsBody" class="text-xs divide-y divide-gray-800/50">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script src="schema_inspector_module.js"></script>
+    <script>
+        function loadSchema() {
+            const fileNum = document.getElementById("siFileNumInput").value.trim();
+            if (!fileNum) return alert("Please enter a file number.");
+            
+            fetch(`/api/schema/inspect/${fileNum}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        alert("Error: " + data.error);
+                        return;
+                    }
+                    window.SchemaInspector.render(data);
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert("Failed to fetch schema data.");
+                });
+        }
+    </script>
+</body>
+</html>

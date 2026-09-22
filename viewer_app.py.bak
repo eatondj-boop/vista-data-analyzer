@@ -1,0 +1,534 @@
+import sqlite3
+import re
+from flask import Flask, g, render_template_string, request, session, abort
+
+app = Flask(__name__)
+app.secret_key = 'vista_analyzer_secret_key'
+DB_PATH = 'data/dynamic_dataset.db'
+
+def get_db():
+    db = getattr(g, '_database', None)
+    if db is None:
+        db = g._database = sqlite3.connect(DB_PATH)
+        db.row_factory = sqlite3.Row
+    return db
+
+@app.teardown_appcontext
+def close_connection(exception):
+    db = getattr(g, '_database', None)
+    if db is not None:
+        db.close()
+
+HTML_TEMPLATE = """
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>VistA Routine Analyzer</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f1f5f9; color: #1e293b; margin: 0; padding: 30px; }
+        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+        h1 { margin-top: 0; font-size: 24px; color: #0f172a; margin-bottom: 20px; }
+        .stats { display: flex; gap: 20px; margin-bottom: 25px; }
+        .stat-card { background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px 20px; border-radius: 6px; flex: 1; }
+        .stat-card h3 { margin: 0 0 5px 0; font-size: 13px; color: #64748b; text-transform: uppercase; }
+        .stat-card p { margin: 0; font-size: 20px; font-weight: bold; color: #0f172a; }
+        .filter-bar { display: flex; gap: 10px; margin-bottom: 25px; flex-wrap: wrap; align-items: center; }
+        .filter-bar select, .filter-bar input { padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; background: white; }
+        .filter-bar input { flex: 1; }
+        .filter-bar button { padding: 10px 20px; background: #2563eb; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
+        .filter-bar button:hover { background: #1d4ed8; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px; table-layout: fixed; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #e2e8f0; word-wrap: break-word; overflow: hidden; text-overflow: ellipsis; }
+        th { background: #f8fafc; font-weight: 600; color: #475569; }
+        tr:hover { background: #f8fafc; }
+        a.routine-link { color: #2563eb; text-decoration: none; font-weight: bold; }
+        a.routine-link:hover { text-decoration: underline; }
+        
+        /* Hyperlink styles for Routines (Red) and Globals (Green) */
+        a.routine-call-link { color: #dc2626; text-decoration: none; font-weight: 600; font-family: monospace; }
+        a.routine-call-link:hover { text-decoration: underline; }
+        a.global-link { color: #16a34a; text-decoration: none; font-weight: 600; font-family: monospace; }
+        a.global-link:hover { text-decoration: underline; }
+        a.line-ref-link { color: #2563eb; text-decoration: none; font-weight: 600; }
+        a.line-ref-link:hover { text-decoration: underline; }
+
+        .nav-toolbar { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; background: #f8fafc; padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0; }
+        .nav-btn { padding: 8px 16px; background: #e2e8f0; color: #334155; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px; border: none; cursor: pointer; }
+        .nav-btn:hover { background: #cbd5e1; }
+        .nav-btn.home { background: #2563eb; color: white; }
+        .nav-btn.home:hover { background: #1d4ed8; }
+        .history-select { padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; background: white; color: #334155; }
+
+        /* Workspace Layout for Code + Dynamic Tree Sidebar */
+        .workspace { display: flex; gap: 20px; align-items: flex-start; }
+        .code-pane { flex: 2; min-width: 0; }
+        .tree-pane { flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; position: sticky; top: 30px; }
+        .tree-pane h3 { margin-top: 0; font-size: 16px; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 10px; }
+        .tree-list { list-style: none; padding-left: 0; margin: 0; font-family: monospace; font-size: 13px; }
+        .tree-list li { margin-bottom: 6px; }
+        .tree-list ul { list-style: none; padding-left: 15px; margin-top: 4px; border-left: 2px dashed #cbd5e1; }
+        .section-title { font-size: 14px; font-weight: bold; color: #0f172a; margin-top: 20px; margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+
+        .code-line { display: block; }
+        .code-line.highlight { background: #1e293b; border-left: 4px solid #38bdf8; padding-left: 6px; }
+        .code-box { font-family: monospace; background: #0f172a; color: #38bdf8; padding: 20px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; line-height: 1.5; font-size: 13px; }
+        .pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
+        .pagination a { padding: 8px 16px; background: #e2e8f0; color: #334155; text-decoration: none; border-radius: 6px; font-weight: 500; }
+        .pagination a:hover { background: #cbd5e1; }
+        .pagination span { color: #64748b; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {% if view == 'inspector' %}
+            <a href="javascript:history.back()" style="display:inline-block; margin-bottom:20px; padding:8px 16px; background:#e2e8f0; color:#334155; text-decoration:none; border-radius:6px; font-weight:500;">← Back to Routine</a>
+            <h1>Data Dictionary Inspector: File {{ file_num }} {% if file_name %}- {{ file_name }}{% endif %}</h1>
+            
+            <div class="stats">
+                <div class="stat-card">
+                    <h3>Target File Number</h3>
+                    <p>{{ file_num }}</p>
+                </div>
+                <div class="stat-card">
+                    <h3>File Name</h3>
+                    <p style="font-size: 16px; color: #2563eb;">{{ file_name or 'Unknown File' }}</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Valid Fields Found</h3>
+                    <p>{{ dd_fields|length }}</p>
+                </div>
+            </div>
+
+            <h3 style="margin-top: 30px; font-size: 18px; color: #0f172a;">Data Dictionary Fields</h3>
+            {% if dd_fields %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 20%;">Field Number</th>
+                            <th style="width: 35%;">Field Name</th>
+                            <th style="width: 45%;">Field Parameters / Definition</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for field in dd_fields %}
+                        <tr>
+                            <td style="font-family: monospace; font-weight: bold; color: #16a34a;">{{ field.field_number }}</td>
+                            <td style="font-weight: 600; color: #0f172a;">{{ field.field_name }}</td>
+                            <td style="font-family: monospace; font-size: 12px; color: #334155;">{{ field.parameters }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 30px; border-radius: 6px; color: #64748b; text-align: center;">
+                    <p style="margin: 0; font-size: 15px;">No valid Data Dictionary field records found for File <strong>{{ file_num }}</strong>.</p>
+                </div>
+            {% endif %}
+
+        {% elif view == 'detail' %}
+            <div class="nav-toolbar">
+                <a href="/?ns={{ selected_ns }}&q={{ search_query }}&page={{ page }}" class="nav-btn home">🏠 Home List</a>
+                <button onclick="history.back()" class="nav-btn">← Back Window</button>
+                <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+                    <label for="historySelect" style="font-size: 13px; font-weight: 600; color: #64748b;">Call Flow History:</label>
+                    <select id="historySelect" class="history-select" onchange="if(this.value) window.location.href=this.value;">
+                        <option value="">-- Navigation Path --</option>
+                        {% for item in call_history %}
+                            <option value="{{ item.url }}" {% if item.routine == routine_name %}selected{% endif %}>
+                                {{ loop.index }}. {{ item.routine }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <h1>Routine: {{ routine_name }}</h1>
+            
+            <div class="workspace">
+                <div class="code-pane">
+                    <div class="code-box">{% for line in routine_lines %}<span id="line-{{ loop.index }}" class="code-line">{{ line['rendered_html']|safe }}</span>
+{% endfor %}</div>
+                </div>
+                
+                <div class="tree-pane">
+                    <h3>🌳 Next Layer Call Tree</h3>
+                    {% if called_routines %}
+                        <ul class="tree-list">
+                            <li><strong>{{ routine_name }}</strong>
+                                <ul>
+                                    {% for child, lines in called_routines.items() %}
+                                        <li>↳ <a href="/routine/{{ child }}?ns={{ selected_ns }}&q={{ search_query }}&page={{ page }}" class="routine-call-link">^{{ child }}</a> 
+                                            <span style="color: #64748b; font-size: 11px;">(Line{% if lines|length > 1 %}s{% endif %} 
+                                            {% for l in lines %}
+                                                <a href="#line-{{ l }}" class="line-ref-link" onclick="highlightLine('line-{{ l }}')">{{ l }}</a>{% if not loop.last %}, {% endif %}
+                                            {% endfor %})</span>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </li>
+                        </ul>
+                    {% else %}
+                        <p style="color: #64748b; font-size: 13px; margin: 0;">No subsequent external routine calls (`D` or `DO`) found in this routine.</p>
+                    {% endif %}
+
+                    <div class="section-title">📂 Referenced Globals</div>
+                    {% if referenced_globals %}
+                        <ul class="tree-list" style="margin-top: 6px;">
+                            {% for signature, details in referenced_globals.items() %}
+                                <li>🟢 
+                                    <a href="/inspector?file={{ details.key_val }}" target="_blank" class="global-link">^{{ details.global_name }}({{ details.key_val }})</a>
+                                    <div style="color: #64748b; font-size: 11px; margin-left: 15px;">Line{% if details.lines|length > 1 %}s{% endif %}: 
+                                    {% for l in details.lines %}
+                                        <a href="#line-{{ l }}" class="line-ref-link" onclick="highlightLine('line-{{ l }}')">{{ l }}</a>{% if not loop.last %}, {% endif %}
+                                    {% endfor %}
+                                    </div>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p style="color: #64748b; font-size: 13px; margin: 0;">No globals referenced in this routine.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <script>
+                function highlightLine(lineId) {
+                    document.querySelectorAll('.code-line').forEach(el => el.classList.remove('highlight'));
+                    const target = document.getElementById(lineId);
+                    if (target) {
+                        target.classList.add('highlight');
+                        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }
+            </script>
+        {% else %}
+            <h1>VistA Routine Analyzer</h1>
+            
+            <div class="stats">
+                <div class="stat-card">
+                    <h3>Active Database</h3>
+                    <p>{{ db_name }}</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Total Packages</h3>
+                    <p>{{ total_packages }}</p>
+                </div>
+            </div>
+
+            <form method="GET" action="/" class="filter-bar">
+                <select name="ns" id="nsSelect" onchange="document.getElementById('qInput').value = this.value; this.form.submit();">
+                    <option value="">-- Select Package / Namespace --</option>
+                    {% for p in packages %}
+                        <option value="{{ p['namespace'] }}" {% if selected_ns == p['namespace'] %}selected{% endif %}>
+                            {{ p['namespace'] }} - {{ p['description'] }}
+                        </option>
+                    {% endfor %}
+                </select>
+                <input type="text" name="q" id="qInput" value="{{ search_query }}" placeholder="Filter routine name (e.g. OR*, OR, or type exact name)...">
+                <button type="submit">Filter</button>
+            </form>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 30%;">Routine Name</th>
+                        <th style="width: 70%;">Routine Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in routines %}
+                    <tr>
+                        <td>
+                            <a class="routine-link" href="/routine/{{ r['routine_name'] }}?ns={{ selected_ns }}&q={{ search_query }}&page={{ page }}" target="_blank">{{ r['routine_name'] }}</a>
+                        </td>
+                        <td style="color: #64748b;">{{ r['routine_desc'] or 'No description available' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="2" style="text-align: center; color: #64748b; padding: 40px;">No routines found matching your filter.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <div class="pagination">
+                {% if page > 1 %}
+                    <a href="/?ns={{ selected_ns }}&q={{ search_query }}&page={{ page - 1 }}">← Previous Page</a>
+                {% else %}
+                    <div></div>
+                {% endif %}
+                
+                <span>Page {{ page }} of {{ total_pages }}</span>
+                
+                {% if page < total_pages %}
+                    <a href="/?ns={{ selected_ns }}&q={{ search_query }}&page={{ page + 1 }}">Next Page →</a>
+                {% else %}
+                    <div></div>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
+"""
+
+@app.route('/')
+def index():
+    db = get_db()
+    cursor = db.cursor()
+    
+    session.pop('call_history', None)
+    
+    selected_ns = request.args.get('ns', '').strip()
+    search_query = request.args.get('q', '').strip()
+    page = int(request.args.get('page', 1))
+    per_page = 50
+    offset = (page - 1) * per_page
+    
+    packages = cursor.execute("SELECT namespace, description FROM vista_packages ORDER BY namespace").fetchall()
+    total_packages = len(packages)
+    
+    where_clauses = []
+    params = []
+    
+    active_filter = search_query if search_query else selected_ns
+    
+    if active_filter:
+        if '*' in active_filter:
+            clean_q = active_filter.replace('*', '%')
+            where_clauses.append("routine_name LIKE ?")
+            params.append(clean_q)
+        else:
+            where_clauses.append("routine_name LIKE ?")
+            params.append(f"{active_filter}%")
+        
+    where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+    
+    count_sql = f"SELECT COUNT(DISTINCT routine_name) FROM vista_routines_clean {where_sql}"
+    total_routines = cursor.execute(count_sql, params).fetchone()[0]
+    total_pages = max(1, (total_routines + per_page - 1) // per_page)
+    
+    query_sql = f"""
+        SELECT routine_name 
+        FROM vista_routines_clean 
+        {where_sql} 
+        GROUP BY routine_name 
+        ORDER BY routine_name 
+        LIMIT ? OFFSET ?
+    """
+    
+    exec_params = params + [per_page, offset]
+    raw_routines = cursor.execute(query_sql, exec_params).fetchall()
+    
+    routines = []
+    for r in raw_routines:
+        r_name = r['routine_name']
+        desc_row = cursor.execute(
+            "SELECT node_value FROM vista_routines_clean WHERE routine_name = ? AND node_value LIKE '%;%' ORDER BY id ASC LIMIT 1",
+            (r_name,)
+        ).fetchone()
+        
+        routine_desc = None
+        if desc_row:
+            val = desc_row['node_value']
+            if ';' in val:
+                parts = val.split(';', 1)
+                routine_desc = parts[1].strip()
+            else:
+                routine_desc = val.strip()
+                
+        routines.append({
+            'routine_name': r_name,
+            'routine_desc': routine_desc
+        })
+    
+    db_filename = DB_PATH.split('/')[-1]
+    
+    return render_template_string(
+        HTML_TEMPLATE,
+        view='list',
+        packages=packages,
+        total_packages=total_packages,
+        routines=routines,
+        selected_ns=selected_ns,
+        search_query=search_query,
+        page=page,
+        total_pages=total_pages,
+        db_name=db_filename
+    )
+
+@app.route('/inspector')
+def file_inspector():
+    db = get_db()
+    cursor = db.cursor()
+    file_num = request.args.get('file', '').strip()
+    
+    dd_fields = []
+    file_name = None
+    
+    if file_num:
+        try:
+            # Attempt to retrieve filename from vista_dic or root DD metadata if available
+            tables = [row['name'] for row in cursor.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            if 'vista_dic' in tables:
+                dic_row = cursor.execute(
+                    "SELECT value FROM vista_dic WHERE CAST(file_number AS TEXT) = ? LIMIT 1",
+                    (file_num,)
+                ).fetchone()
+                if dic_row and dic_row['value']:
+                    parts = str(dic_row['value']).split('^')
+                    file_name = parts[0].strip('"')
+            
+            rows = cursor.execute(
+                """
+                SELECT field_number, node_key, value 
+                FROM vista_dd 
+                WHERE CAST(file_number AS TEXT) = ? 
+                ORDER BY field_number ASC
+                """,
+                (file_num,)
+            ).fetchall()
+            
+            for r in rows:
+                f_num = str(r['field_number'] or '').strip()
+                node_key = str(r['node_key'] or '').strip()
+                val = str(r['value'] or '')
+                
+                # If filename wasn't found in vista_dic, check if field .01 holds the file/root name in vista_dd
+                if not file_name and f_num == '.01' and node_key == '0':
+                    parts = val.split('^')
+                    if parts and parts[0]:
+                        file_name = parts[0].strip('"')
+
+                if f_num.startswith('"') or f_num.endswith('"') or f_num == '0':
+                    continue
+                
+                if not re.match(r'^[0-9\.]+$', f_num):
+                    continue
+                
+                parts = val.split('^')
+                field_name = parts[0].strip('"') if len(parts) > 0 and parts[0] != '' else f"FIELD {f_num}"
+                parameters = ' ^ '.join(parts[1:]) if len(parts) > 1 else val
+                
+                if not any(d['field_number'] == f_num for d in dd_fields):
+                    dd_fields.append({
+                        'field_number': f_num,
+                        'field_name': field_name,
+                        'parameters': parameters
+                    })
+        except Exception as e:
+            print(f"[ERROR] Filename-resolved DD inspector query failed: {e}")
+
+    return render_template_string(
+        HTML_TEMPLATE,
+        view='inspector',
+        file_num=file_num,
+        file_name=file_name or f"FILE #{file_num}",
+        dd_fields=dd_fields
+    )
+
+@app.route('/routine/<routine_name>')
+def routine_detail(routine_name):
+    db = get_db()
+    cursor = db.cursor()
+    
+    selected_ns = request.args.get('ns', '').strip()
+    search_query = request.args.get('q', '').strip()
+    page = request.args.get('page', '1')
+    
+    call_history = session.get('call_history', [])
+    current_url = request.full_path if request.full_path.startswith('/?') else f"/routine/{routine_name}?{request.query_string.decode()}"
+    
+    existing_indices = [i for i, h in enumerate(call_history) if h['routine'] == routine_name]
+    if existing_indices:
+        call_history = call_history[:existing_indices[0] + 1]
+    else:
+        call_history.append({'routine': routine_name, 'url': current_url})
+    
+    session['call_history'] = call_history
+    
+    all_lines = cursor.execute(
+        "SELECT node_value FROM vista_routines_clean WHERE routine_name = ? ORDER BY id ASC", 
+        (routine_name,)
+    ).fetchall()
+    
+    raw_routine_lines = all_lines[2:] if len(all_lines) > 2 else []
+    
+    called_routines_map = {}
+    referenced_globals_map = {}
+    routine_lines = []
+    
+    for idx, line in enumerate(raw_routine_lines, start=1):
+        text = line['node_value']
+        
+        def replace_routine_call(match):
+            prefix = match.group(1)
+            subroutine = match.group(2)
+            routine_name_target = match.group(3)
+            
+            if routine_name_target not in called_routines_map:
+                called_routines_map[routine_name_target] = []
+            if idx not in called_routines_map[routine_name_target]:
+                called_routines_map[routine_name_target].append(idx)
+            
+            href = f"/routine/{routine_name_target}?ns={selected_ns}&q={search_query}&page={page}"
+            sub_part = f"{subroutine}^" if subroutine else ""
+            return f'{prefix} {sub_part}<a href="{href}" class="routine-call-link">^{routine_name_target}</a>'
+
+        processed_text = re.sub(r'\b(D(?:O)?)\s+([A-Za-z0-9]+)?\^([%A-Za-z0-9\.]+)', replace_routine_call, text)
+
+        def replace_global(match):
+            global_name = match.group(1).upper()
+            if global_name in ('TMP', 'XTMP'):
+                return match.group(0)
+            
+            rest_of_line = text[match.end():]
+            key_match = re.match(r'\s*("[^"]+"|[0-9\.]+|[A-Za-z0-9\.]+)', rest_of_line)
+            key_val = key_match.group(1) if key_match else "UNKNOWN"
+            
+            is_numeric_file = bool(re.match(r'^[0-9\.]+$', key_val))
+            
+            signature = f"{global_name}({key_val})"
+            if signature not in referenced_globals_map:
+                referenced_globals_map[signature] = {
+                    'global_name': global_name,
+                    'key_val': key_val,
+                    'is_numeric_file': is_numeric_file,
+                    'lines': []
+                }
+            
+            if idx not in referenced_globals_map[signature]['lines']:
+                referenced_globals_map[signature]['lines'].append(idx)
+            
+            dd_href = f"/inspector?file={key_val}"
+                
+            return f'<a href="{dd_href}" target="_blank" class="global-link">^{match.group(1)}</a>('
+
+        processed_text = re.sub(r'\^([%A-Za-z0-9\.]+)\(', replace_global, processed_text)
+
+        routine_lines.append({
+            'node_value': text,
+            'rendered_html': processed_text
+        })
+        
+    called_routines = {k: sorted(v) for k, v in sorted(called_routines_map.items())}
+    referenced_globals = {k: referenced_globals_map[k] for k in sorted(referenced_globals_map.keys())}
+        
+    return render_template_string(
+        HTML_TEMPLATE,
+        view='detail',
+        routine_name=routine_name,
+        routine_lines=routine_lines,
+        selected_ns=selected_ns,
+        search_query=search_query,
+        page=page,
+        call_history=call_history,
+        called_routines=called_routines,
+        referenced_globals=referenced_globals
+    )
+
+if __name__ == '__main__':
+    print("Starting VistA Routine Analyzer web server...")
+    print("Open your browser and navigate to: http://127.0.0.1:5000")
+    app.run(host='0.0.0.0', port=5000, debug=True)

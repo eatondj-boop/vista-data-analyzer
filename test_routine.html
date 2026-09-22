@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VistA Routine Research Workbench</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 font-sans p-6">
+    <div class="max-w-7xl mx-auto space-y-6">
+        
+        <div class="bg-gray-900 p-4 rounded-lg border border-gray-800 flex items-center justify-between">
+            <h1 class="text-xl font-bold text-emerald-400">VistA Routine Research Workbench</h1>
+            <a href="test_inspector.html" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-emerald-400 rounded text-sm font-semibold transition border border-gray-700 cursor-pointer">
+                Switch to File Research &rarr;
+            </a>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="bg-gray-900 p-4 rounded-lg border border-gray-800 space-y-4">
+                <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Routine Index</h2>
+                <input type="text" id="routineSearchInput" oninput="RoutineAnalyzer.searchRoutines()" placeholder="Search routines (e.g., ^DPT)..." class="w-full bg-gray-950 border border-gray-700 px-3 py-2 rounded text-sm text-gray-200 focus:outline-none focus:border-emerald-500 font-mono">
+                <div id="routineListContainer" class="space-y-1 h-[600px] overflow-y-auto pr-1">
+                    <p class="text-xs text-gray-500 italic p-2">Loading routines...</p>
+                </div>
+            </div>
+
+            <div class="md:col-span-2 bg-gray-900 rounded-lg border border-gray-800 flex flex-col h-[700px]">
+                <div class="p-4 border-b border-gray-800 flex items-center justify-between">
+                    <h3 id="activeRoutineTitle" class="text-sm font-mono font-bold text-emerald-400">Select a routine</h3>
+                </div>
+                <div id="routineCodeBody" class="flex-1 overflow-y-auto p-2 font-mono text-xs text-gray-300">
+                    <p class="text-gray-500 italic p-4">Choose a routine from the list to inspect its lines of code.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="routine_analyzer_module.js"></script>
+</body>
+</html>
