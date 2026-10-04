@@ -523,7 +523,13 @@ def index():
     <body>
         <div class="container">
             <div class="header-bar">
-                <h1>VistA Enterprise Analyzer</h1>
+                <div>
+                    <h1>VistA Enterprise Analyzer</h1>
+                    <div style="margin-top: 10px; margin-bottom: 5px; background: #fffbeb; border: 1px solid #f59e0b; padding: 8px 14px; border-radius: 6px; display: inline-flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 12px; font-weight: bold; color: #b45309;">Beta Version 0.1</span>
+                        <span style="background: #dc2626; color: white; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; text-transform: uppercase;">⚠️ Important: The information in the application is not up to date and should ONLY be used for demo purposes!</span>
+                    </div>
+                </div>
                 <div class="nav-group">
                     <a href="/impact" class="btn">Data Dictionary</a>
                     <a href="/xrf-view?filter=DG" class="btn btn-secondary">XRF Matrix</a>
@@ -607,7 +613,7 @@ def index():
             <h2>
                 <span>📋 Actionable Remediation & Research Register</span>
                 <span>
-                    <button type="button" class="btn" style="font-size: 11px; padding: 4px 8px;" onclick="printSelectedRows()">🖨️️ Print Selected Rows</button>
+                    <button type="button" class="btn" style="font-size: 11px; padding: 4px 8px;" onclick="printSelectedRows()">🖨 Print Selected Rows</button>
                 </span>
             </h2>
             <table id="remediationTable">
@@ -686,7 +692,7 @@ def build_database():
         <body>
             <div class="card">
                 <h2>⚙️ Parametric Build & Master Index Generation</h2>
-                <p style="color: #94a3b8; font-size: 13px;">Executing build with dynamic invocation classifications...</p>
+                <p style="color: #94a3b8; font-size: 13px;">Executing build with dynamic invocation classifications & comprehensive noise filters...</p>
                 <div class="console" id="console">
         """
         
@@ -838,8 +844,27 @@ def build_database():
                         targets = global_matches if global_matches else [rname]
 
                         for target in targets:
+                            clean_target_upper = target.upper()
                             clean_target_root = target.lstrip('^').split('(')[0].upper()
                             
+                            # ==========================================
+                            # COMPREHENSIVE NOISE & FALSE POSITIVE GUARDRAILS
+                            # ==========================================
+                            # 1. Screenman / ListMan UI Display Fragments
+                            if any(kw in clean_target_upper for kw in ['TXT', 'VALM1', 'IOM']) or any(kw in code_upper for kw in ['TXT(CNT)', 'VALM1']):
+                                continue
+                            # 2. Parser Artifacts / Syntactic Noise
+                            if clean_target_upper.startswith('^S') or (not '(' in clean_target_upper and clean_target_upper.startswith('^') and len(clean_target_upper) < 4):
+                                continue
+                            # 3. Dynamic Indirection
+                            if '@' in clean_target_upper or '@' in code_upper:
+                                continue
+                            # 4. Intrinsic / Extrinsic System & FileMan API Function Calls (e.g. ^XLFDT, ^DIE(...))
+                            if (clean_target_upper.startswith(tuple([f'^{fn}' for fn in ['XLFDT', 'XLFSTR', 'XLFCRC', 'XLF']])) or \
+                                (clean_target_upper.startswith(('^DIE', '^DIC', '^DIK', '^DIQ')) and ('$' in clean_target_upper or ',' in clean_target_upper))) and '(' in clean_target_upper:
+                                continue
+                            # ==========================================
+
                             if clean_target_root.startswith('%') or clean_target_root in {'TMP', 'XTMP', 'UT', 'UTILITY', 'XUTL', 'ADIE', 'ADDIOL', 'DIR', 'DIC', 'DIK', 'DIQ', 'B', rname.upper()}:
                                 continue
 
